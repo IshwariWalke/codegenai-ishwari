@@ -41,8 +41,11 @@ AI-powered code generation and document analysis assistant built using Streamlit
      🖼 PNG, JPG (OCR)
 
 ⚙️ Setup
+
      git clone https://github.com/<IshwariWalke>/codegenai-ishwari.git
+     
      cd codegenai-ishwari
+     
      pip install streamlit requests pillow PyPDF2 python-docx pytesseract
 
 
