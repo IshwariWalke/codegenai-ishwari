@@ -1,69 +1,120 @@
-# codegenai-ishwari
+🤖 Code Gen AI
 
-CodeGenAI 💬
-
-Infosys Springboard – AI Virtual Internship (CodeGen AI)
-
-AI-powered code generation and document analysis assistant built using Streamlit and a locally hosted LLaMA-3 model.
+Code Gen AI is an AI-powered coding assistant built using Streamlit and Groq LLMs.
+It helps users explain programming concepts, generate code, debug errors, and extract code/text from files using OCR, all in an interactive chat interface.
 
 🚀 Features
 
-     AI chat for code generation & Q&A
+     💬 Chat-based AI assistant for coding help
      
-     PDF, DOCX, TXT, CSV file analysis
+     📚 Explain concepts with examples
      
-     Image OCR support
+     💻 Generate & fix code
      
-     User login/signup
+     💡 Project and coding ideas
      
-     Chat history management
+     📎 File upload support (Images, PDFs, TXT, Python files)
      
-     Local LLM inference using Ollama
+     🔍 OCR integration using Tesseract (extract text from images & PDFs)
+     
+     🎤 Voice input support (Speech-to-text)
+     
+     🧠 Multiple model selection (Groq LLMs)
+     
+     🗂️ Multiple chat threads with history
+     
+     🎨 Modern UI with custom CSS styling
 
-🛠 Tech Stack
+🛠️ Tech Stack
 
-     Python
+     Frontend & App Framework: Streamlit
      
-     Streamlit
+     LLM API: Groq
      
-     LLaMA-3 (Ollama)
+     OCR: Tesseract, pdf2image
      
-     PyPDF2, python-docx
+     Speech Recognition: SpeechRecognition
      
-     pytesseract (OCR)
+     Language: Python
 
-📂 Supported Inputs
+📦 Installation & Setup
 
-     📄 PDF, DOCX
+     1️⃣ Clone the repository
      
-     📝 TXT, CSV
-     
-     🖼 PNG, JPG (OCR)
-
-⚙️ Setup
-
-     git clone https://github.com/<IshwariWalke>/codegenai-ishwari.git
+     git clone https://github.com/IshwariWalke/codegenai-ishwari.git
      
      cd codegenai-ishwari
      
-     pip install streamlit requests pillow PyPDF2 python-docx pytesseract
+     2️⃣ Create a virtual environment (recommended)
+     
+     python -m venv venv
+     
+     source venv/bin/activate   # On Windows: venv\Scripts\activate
+     
+     3️⃣ Install dependencies
+     
+     pip install -r requirements.txt
+     
+     
+     If requirements.txt is not present:
+     
+     pip install streamlit groq speechrecognition pillow pytesseract pdf2image
 
+🔑 API Key Setup
 
-Run Ollama:
+     Set your Groq API key as an environment variable:
+     
+     Windows
+     set GROQ_API_KEY=your_api_key_here
+     
+     macOS / Linux
+     export GROQ_API_KEY=your_api_key_here
+     
+     
+     ⚠️ Do NOT hardcode API keys in production
 
-     ollama run llama3
-
-
-Start app:
+▶️ Run the Application
 
      streamlit run app.py
 
-🧠 Architecture
-     User → Streamlit UI
-          → File/Text Processing
-          → Ollama API (LLaMA-3)
-          → AI Response
+     Then open:
+     
+     http://localhost:8501
 
-🎓 Internship Context
+📂 Supported File Types
 
-     Developed as part of Infosys Springboard AI Virtual Internship – CodeGen AI to demonstrate practical AI application development using LLMs.
+     Images: png, jpg, jpeg
+     
+     Documents: pdf, txt
+     
+     Code files: py
+
+🧠 Available Models
+
+     llama-3.1-8b-instant
+     
+     llama-3.1-70b-versatile
+     
+     mixtral-8x7b-32768
+     
+     (Model can be selected from the sidebar)
+
+⚠️ Known Limitations
+
+     OCR accuracy depends on image quality
+     
+     Speech input may fail in noisy environments
+     
+     Large files may take longer to process
+
+📌 Future Improvements
+
+     Authentication & user profiles
+     
+     Persistent chat storage (database)
+     
+     Streaming responses
+     
+     Better error handling
+     
+     Deployment on cloud (AWS / Streamlit Cloud)
