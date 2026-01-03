@@ -1,0 +1,425 @@
+import streamlit as st
+import json
+import requests
+from datetime import datetime
+from PIL import Image
+from io import BytesIO
+import time
+
+# Optional parsing/ocr libraries
+try:
+    from PyPDF2 import PdfReader
+except Exception:
+    PdfReader = None
+
+try:
+    import docx
+except Exception:
+    docx = None
+
+try:
+    import pytesseract
+except Exception:
+    pytesseract = None
+
+# ---------------------
+# Page configuration
+# ---------------------
+st.set_page_config(
+    page_title="CodeGenAI",
+    page_icon="💬",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ---------------------
+# CSS (dark theme placeholder)
+# ---------------------
+st.markdown("""<style>
+/* Customize your dark theme CSS here */
+body {background-color:#1e1e1e; color:#f0f0f0;}
+.stButton>button {background-color:#333333; color:white;}
+.stTextInput>div>input {background-color:#2c2c2c; color:white;}
+</style>""", unsafe_allow_html=True)
+
+# ---------------------
+# Session state init
+# ---------------------
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+if "user_logged_in" not in st.session_state:
+    st.session_state.user_logged_in = False
+
+if "user_data" not in st.session_state:
+    st.session_state.user_data = {"name": "", "email": "", "username": ""}
+
+if "current_chat_id" not in st.session_state:
+    st.session_state.current_chat_id = None
+
+if "all_users" not in st.session_state:
+    st.session_state.all_users = {}  # {"username": {"name":..., "email":..., "password":..., "chats":[...] }}
+
+if "input_text" not in st.session_state:
+    st.session_state.input_text = ""
+
+if "uploaded_files_key" not in st.session_state:
+    st.session_state.uploaded_files_key = 0
+
+if "is_processing" not in st.session_state:
+    st.session_state.is_processing = False
+
+
+# ---------------------
+# Ollama chat function (local Llama3)
+# ---------------------
+def generate_response(user_input, conversation_history):
+    try:
+        url = "http://localhost:11434/api/chat"
+        messages = [{"role": msg.get("role","user"), "content": msg.get("content","")} for msg in conversation_history]
+        messages.append({"role": "user", "content": user_input})
+        payload = {"model": "llama3", "messages": messages, "stream": False}
+        response = requests.post(url, json=payload, timeout=120)
+        if response.status_code == 200:
+            return response.json().get("message", {}).get("content", "")
+        else:
+            return f"❌ Error from Ollama: {response.status_code} {response.text}"
+    except Exception as e:
+        return f"⚠️ Cannot connect to local LLaMA-3. Make sure `ollama run llama3` is running.\nError: {e}"
+
+# ---------------------
+# File processing -> extract text -> ask Llama
+# ---------------------
+def process_file_with_llama(uploaded_file):
+    try:
+        extracted_text = ""
+        name = uploaded_file.name.lower()
+        uploaded_file.seek(0)
+        raw = uploaded_file.read()
+
+        # -------- PDF --------
+        if name.endswith(".pdf"):
+            if PdfReader is None:
+                return ("⚠️ PyPDF2 not installed.", "")
+            reader = PdfReader(BytesIO(raw))
+            extracted_text = "\n\n".join(
+                [p.extract_text() or "" for p in reader.pages]
+            )
+
+        # -------- DOCX --------
+        elif name.endswith(".docx"):
+            if docx is None:
+                return ("⚠️ python-docx not installed.", "")
+            document = docx.Document(BytesIO(raw))
+            extracted_text = "\n\n".join(
+                [p.text for p in document.paragraphs if p.text]
+            )
+
+        # -------- TXT / CSV --------
+        elif name.endswith(".txt") or name.endswith(".csv"):
+            extracted_text = raw.decode("utf-8", errors="ignore")
+
+        # -------- IMAGE OCR --------
+        elif uploaded_file.type and uploaded_file.type.startswith("image"):
+            if pytesseract is None:
+                return ("⚠️ pytesseract not installed — OCR unavailable.", "")
+            img = Image.open(BytesIO(raw))
+            extracted_text = pytesseract.image_to_string(img)
+
+        else:
+            return ("⚠️ Unsupported file type.", "")
+
+        if not extracted_text.strip():
+            return ("⚠️ No readable text found.", "")
+
+        return (None, extracted_text.strip())
+
+    except Exception as e:
+        return (f"⚠️ File processing error: {e}", "")
+
+# ---------------------
+# Sidebar (login/signup and chats)
+# ---------------------
+with st.sidebar:
+    st.markdown("### 💬 CodeGenAI")
+
+    if st.session_state.user_logged_in:
+        st.markdown("---")
+        col1, col2 = st.columns([4,1])
+        with col1:
+            st.markdown(f"**{st.session_state.user_data['name']}**")
+            st.caption(st.session_state.user_data['email'])
+        st.markdown("---")
+
+        # New Chat
+        if st.button("➕ New Chat", use_container_width=True):
+            st.session_state.messages = []
+            st.session_state.current_chat_id = None
+            st.experimental_rerun()
+
+        # Show user chats
+        st.markdown("### Recent")
+        username = st.session_state.user_data["username"]
+        user_chats = st.session_state.all_users.get(username, {}).get("chats", [])
+
+        if user_chats:
+            for idx, chat in enumerate(user_chats):
+                col1, col2 = st.columns([5,1])
+                with col1:
+                    if st.button(chat["title"], key=f"history_{idx}", use_container_width=True):
+                        st.session_state.messages = chat["messages"].copy()
+                        st.session_state.current_chat_id = idx
+                        st.experimental_rerun()
+                with col2:
+                    if st.button("🗑️", key=f"delete_{idx}", help="Delete chat"):
+                        user_chats.pop(idx)
+                        st.session_state.all_users[username]["chats"] = user_chats
+                        if st.session_state.current_chat_id == idx:
+                            st.session_state.messages = []
+                            st.session_state.current_chat_id = None
+                        st.experimental_rerun()
+        else:
+            st.caption("No chats yet")
+
+        st.markdown("---")
+        # Logout
+        if st.button("🚪 Logout", use_container_width=True):
+            # Save current messages before logout
+            if st.session_state.current_chat_id is not None and st.session_state.messages:
+                st.session_state.all_users[username]["chats"][st.session_state.current_chat_id]["messages"] = st.session_state.messages.copy()
+            st.session_state.user_logged_in = False
+            st.session_state.messages = []
+            st.session_state.current_chat_id = None
+            st.session_state.user_data = {"name": "", "email": "", "username": ""}
+            st.experimental_rerun()
+
+    else:
+        st.markdown("---")
+        login_tab, signup_tab = st.tabs(["Login","Sign Up"])
+
+        # ----------------- LOGIN -----------------
+        with login_tab:
+            with st.form("login_form"):
+                email = st.text_input("Email")
+                password = st.text_input("Password", type="password")
+                submit = st.form_submit_button("Login")
+                if submit:
+                    if not email or not password:
+                        st.error("Please fill all fields")
+                    else:
+                        username = email.split("@")[0]
+                        if username in st.session_state.all_users and st.session_state.all_users[username]["password"] == password:
+                            st.session_state.user_logged_in = True
+                            st.session_state.user_data = {
+                                "name": st.session_state.all_users[username]["name"],
+                                "email": email,
+                                "username": username
+                            }
+                            # Load user chats
+                            st.session_state.chat_history = st.session_state.all_users[username]["chats"].copy()
+                            st.session_state.messages = []
+                            st.session_state.current_chat_id = None
+                            st.experimental_rerun()
+                        else:
+                            st.error("Invalid email or password")
+
+        # ----------------- SIGN UP -----------------
+        with signup_tab:
+            with st.form("signup_form"):
+                name = st.text_input("Full Name")
+                email = st.text_input("Email", key="signup_email")
+                password = st.text_input("Password", type="password", key="signup_password")
+                confirm_password = st.text_input("Confirm Password", type="password")
+                submit = st.form_submit_button("Sign Up")
+                if submit:
+                    if not name or not email or not password or not confirm_password:
+                        st.error("Please fill all fields")
+                    elif password != confirm_password:
+                        st.error("Passwords do not match")
+                    else:
+                        username = email.split("@")[0]
+                        if username in st.session_state.all_users:
+                            st.error("Account already exists")
+                        else:
+                            # Create user
+                            st.session_state.all_users[username] = {
+                                "name": name,
+                                "email": email,
+                                "password": password,
+                                "chats": []
+                            }
+                            st.session_state.user_logged_in = True
+                            st.session_state.user_data = {"name": name,"email": email,"username": username}
+                            st.session_state.chat_history = []
+                            st.session_state.messages = []
+                            st.session_state.current_chat_id = None
+                            st.experimental_rerun()
+
+# ---------------------
+# Main chat area
+# ---------------------
+if st.session_state.user_logged_in:
+    st.markdown("<div style='height:50px'></div>", unsafe_allow_html=True)
+
+    # Display conversation
+    for msg in st.session_state.messages:
+        role = msg.get("role","assistant")
+        avatar = "🧑" if role=="user" else "🤖"
+        with st.chat_message(role, avatar=avatar):
+            st.markdown(msg.get("content",""))
+            if "files" in msg and msg["files"]:
+                for f in msg["files"]:
+                    if f.get("type")=="image" and f.get("data") is not None:
+                        st.image(f["data"], caption=f["name"])
+                    else:
+                        st.info(f"📎 {f['name']}")
+
+    st.markdown("---")
+
+    # Input
+    col1, col2 = st.columns([0.8, 1])
+    with col1:
+        uploaded_files = st.file_uploader("Attach files", accept_multiple_files=True, type=["pdf","docx","txt","csv","png","jpg","jpeg","gif"], key=st.session_state.uploaded_files_key)
+
+    with col2:
+        cols = st.columns([10,1])
+        with cols[0]:
+            user_input = st.text_input("Message", placeholder="Type your message...", key=f"input_text_{st.session_state.uploaded_files_key}")
+
+        with cols[1]:
+            send_button = st.button("📤")
+
+    if send_button and user_input.strip() and not st.session_state.is_processing:
+
+        st.session_state.is_processing = True
+
+        files_meta = []
+        if uploaded_files:
+            for f in uploaded_files:
+                if f.type and f.type.startswith("image"):
+                    try:
+                        img = Image.open(f)
+                        files_meta.append({
+                            "name": f.name,
+                            "type": "image",
+                            "data": img,
+                            "file_object": f
+                        })
+                    except Exception:
+                        files_meta.append({
+                            "name": f.name,
+                            "type": "file",
+                            "data": None,
+                            "file_object": f
+                        })
+                else:
+                    files_meta.append({
+                        "name": f.name,
+                        "type": "file",
+                        "data": None,
+                        "file_object": f
+                    })
+
+        st.session_state.messages.append({
+            "role": "user",
+            "content": user_input,
+            "timestamp": datetime.now().strftime("%H:%M"),
+            "files": files_meta if files_meta else None
+        })
+
+        # ✅ CLEAR MESSAGE + ATTACHMENTS
+        
+        st.session_state.uploaded_files_key += 1
+
+        st.experimental_rerun()
+
+
+    # Generate assistant reply
+    if st.session_state.is_processing and st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+        last_user = st.session_state.messages[-1]
+        last_user_content = last_user.get("content", "")
+
+        with st.spinner("Analyzing / Thinking..."):
+            # time.sleep(0.5)
+
+            # -------------------------
+            # Process non-image files
+            # -------------------------
+            if "files" in last_user and last_user["files"]:
+                for f in last_user["files"]:
+                    if f["type"] == "file":
+                        err, analysis = process_file_with_llama(
+                            f.get("file_object", f)
+                        )
+                        if err:
+                            content = f"⚠️ File {f['name']} analysis error:\n{err}"
+                        else:
+                            content = f"📄 **Analysis of {f['name']}:**\n\n{analysis}"
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": content,
+                            "timestamp": datetime.now().strftime("%H:%M")
+                        })
+
+            # -------------------------
+            # OCR for images
+            # -------------------------
+            ocr_context = ""
+
+            if "files" in last_user and last_user["files"]:
+                for f in last_user["files"]:
+                    if f["type"] == "image":
+                        err, extracted_text = process_file_with_llama(
+                            f.get("file_object", f)
+                        )
+                        if extracted_text:
+                            ocr_context += (
+                                f"\nText extracted from image ({f['name']}):\n"
+                                f"{extracted_text}\n"
+                            )
+
+        # -------------------------
+        # FINAL PROMPT (OCR + user text)
+        # -------------------------
+        final_prompt = last_user_content
+
+        if ocr_context:
+            final_prompt = (
+                "You are an AI assistant analyzing text extracted from user-provided images.\n\n"
+                f"{ocr_context}\n\n"
+                "Answer the user's question using this information.\n\n"
+                f"User question: {last_user_content}"
+            )
+
+        ai_response = generate_response(
+            final_prompt,
+            st.session_state.messages[:-1]
+        )
+
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": ai_response,
+            "timestamp": datetime.now().strftime("%H:%M")
+        })
+
+
+        # Save chat history per user
+        username = st.session_state.user_data["username"]
+        if st.session_state.current_chat_id is None:
+            title = last_user_content[:50] +"..." if len(last_user_content)>50 else last_user_content
+            chat_entry = {"title": title, "messages": st.session_state.messages.copy(), "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")}
+            st.session_state.chat_history.insert(0, chat_entry)
+            st.session_state.all_users[username]["chats"] = st.session_state.chat_history.copy()
+            st.session_state.current_chat_id = 0
+        else:
+            st.session_state.all_users[username]["chats"][st.session_state.current_chat_id]["messages"] = st.session_state.messages.copy()
+            st.session_state.chat_history = st.session_state.all_users[username]["chats"].copy()
+        
+        st.session_state.is_processing = False
+        st.experimental_rerun()
+else:
+    st.markdown("# 👋 Welcome")
+    st.markdown("### Sign in or create an account to start chatting")
